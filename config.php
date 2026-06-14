@@ -12,6 +12,23 @@ function apiweb_starter_env(string $name, string $fallback = ''): string
     return $value === false ? $fallback : $value;
 }
 
+/**
+ * Reads a boolean environment value.
+ *
+ * @param string $name Environment variable name.
+ * @param bool $fallback Fallback value.
+ * @return bool Boolean value.
+ */
+function apiweb_starter_bool(string $name, bool $fallback = false): bool
+{
+    $value = getenv($name);
+    if ($value === false || $value === '') {
+        return $fallback;
+    }
+
+    return in_array(strtolower((string)$value), ['1', 'true', 'yes', 'on'], true);
+}
+
 return [
     'apiweb' => [
         'secret' => apiweb_starter_env('APIWEB_TEST_KEY', 'local-dev-api-key-2026'),
@@ -39,6 +56,6 @@ return [
     ],
     'debug' => [
         'failure_mode' => apiweb_starter_env('APIWEB_FAILURE_MODE', ''),
+        'allow_request_failure_mode' => apiweb_starter_bool('APIWEB_ALLOW_REQUEST_FAILURE_MODE', false),
     ],
 ];
-

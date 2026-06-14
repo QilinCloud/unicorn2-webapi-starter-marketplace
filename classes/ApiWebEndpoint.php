@@ -52,7 +52,9 @@ final class ApiWebEndpoint
             return [200, ApiWebResponse::protocolError(400, 'Request Objects must be an array.', true)];
         }
 
-        if (($this->config['connector']['mode'] ?? 'demo') === 'demo') {
+        $allowRequestFailureMode = (($this->config['connector']['mode'] ?? 'demo') === 'demo')
+            || (($this->config['debug']['allow_request_failure_mode'] ?? false) === true);
+        if ($allowRequestFailureMode) {
             $failureMode = (string)($request['Debug']['FailureMode'] ?? '');
             if ($failureMode !== '') {
                 $this->marketplace->setFailureMode($failureMode);
@@ -124,7 +126,9 @@ final class ApiWebEndpoint
             'ConnectorVersion' => (string)($this->config['connector']['version'] ?? '1.0.0'),
             'SupportedLanguages' => ['de', 'en'],
             'SupportedCurrencies' => ['EUR'],
+            'SupportedWaehrungen' => ['EUR'],
             'SupportedPaymentMethods' => ['Unknown'],
+            'SupportedZahlungsarten' => ['Unknown'],
             'SupportedMethods' => [
                 'validateCredentials',
                 'getCapabilities',
