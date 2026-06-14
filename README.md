@@ -14,6 +14,7 @@ Public documentation:
 - https://webservice.marcos-software.de/troubleshooting.html
 - https://webservice.marcos-software.de/endpoints.html
 - https://webservice.marcos-software.de/conformance.html
+- https://webservice.marcos-software.de/field-test-checklist.html
 - https://webservice.marcos-software.de/ai-build-prompt.md
 - https://webservice.marcos-software.de/openapi.yaml
 
@@ -42,6 +43,28 @@ http://127.0.0.1:18080/api.php
 7. Map missing required marketplace identifiers to ApiWeb error code `422`.
 8. Continue processing later objects when one object fails.
 
+## HMAC rules that must not be changed
+
+- Body hash is `Base64(SHA256(raw JSON body bytes))`, not hex.
+- Signature is `Base64(HMAC-SHA256(canonical, shared ApiWeb key))`, not hex.
+- Canonical lines are signature version, timestamp, nonce, ApiWeb method,
+  transport method and body hash.
+- Request transport method is `POST`.
+- Response transport marker is `RESPONSE`.
+- Response `X-Unicorn-Api-Method` must be the original method, for example
+  `getOrders`, never `response`.
+- Sign the exact raw JSON string that is sent over HTTP. Do not reformat JSON
+  between hashing/signing and sending.
+
+## Identifier rules for write methods
+
+For `setStock`, `setPrice`, `setProcessingTime` and similar methods, prefer a
+real marketplace id from `MarketplaceId`, `MarketplaceOfferId`, `UnitId` or
+`ShopId`. If the target marketplace requires another offer/listing/unit id,
+resolve it from `ArtikelNummer`, `Sku`, `SKU`, `SellerSku`, `EAN` or `GTIN`.
+Return an object-level `404` or `422` only when the adapter cannot identify the
+target object.
+
 ## Supported minimal methods
 
 - `validateCredentials`
@@ -67,6 +90,11 @@ Run the full conformance smoke suite:
 ```powershell
 php tools/run_conformance.php http://127.0.0.1:18080/api.php
 ```
+
+The conformance runner validates both request and response signatures. A
+connector that returns valid JSON but signs the response with hex hashes,
+`POST`, or `X-Unicorn-Api-Method: response` must fail before it is connected to
+Unicorn.
 
 Run the connector in `real` mode against the included local mock marketplace:
 
@@ -113,7 +141,19 @@ the mock marketplace. Do not enable it in production hosting.
 
 ## Assumptions
 
-- `ShopId` is the marketplace-side identifier for update methods.
+- `ShopId` is the preferred marketplace-side identifier for update methods, but
+  a real adapter may need to resolve a separate marketplace offer/listing/unit
+  id from SKU or EAN.
 - `getOrders` returns an ApiWeb collection; empty order lists are valid success responses.
 - Unsupported features must be reported as `false` in `getCapabilities`.
 - The target marketplace documentation defines the external authentication, pagination and field mapping rules. This starter only defines the Unicorn 2 side.
+
+## Deployment checklist
+
+- Determine the exact public URL to `api.php`; FTP hostings may expose a
+  subfolder such as `/homepage/api.php`.
+- Unsigned public calls to `api.php` should return a JSON `401` protocol error.
+- A `404` means wrong public path; a `500` means PHP/server failure.
+- `config.php`, `.env`, backups and logs must not be downloadable.
+- Run a signed `validateCredentials` against the public URL before configuring
+  Unicorn 2.

@@ -9,6 +9,18 @@ require_once __DIR__ . '/classes/ApiWebEndpoint.php';
 $config = Config::load(__DIR__ . '/config.php');
 $body = file_get_contents('php://input') ?: '';
 $headers = function_exists('getallheaders') ? getallheaders() : [];
+$decodedForResponseSigning = json_decode($body, true);
+$responseApiMethod = is_array($decodedForResponseSigning) && isset($decodedForResponseSigning['Method'])
+    ? (string)$decodedForResponseSigning['Method']
+    : '';
+if ($responseApiMethod === '') {
+    foreach ($headers as $name => $value) {
+        if (strcasecmp((string)$name, 'X-Unicorn-Api-Method') === 0) {
+            $responseApiMethod = (string)$value;
+            break;
+        }
+    }
+}
 
 try {
     $endpoint = new ApiWebEndpoint($config, new MarketplaceClient($config));
@@ -29,6 +41,5 @@ if ($responseBody === false) {
 
 http_response_code($statusCode);
 header('Content-Type: application/json; charset=utf-8');
-ApiWebSecurity::emitResponseHeaders($config, $responseBody);
+ApiWebSecurity::emitResponseHeaders($config, $responseBody, $responseApiMethod);
 echo $responseBody;
-
