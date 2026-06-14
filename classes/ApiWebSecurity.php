@@ -20,8 +20,8 @@ final class ApiWebSecurity
         $method = $normalized['x-unicorn-api-method'] ?? '';
         $timestamp = $normalized['x-unicorn-timestamp'] ?? '';
         $nonce = $normalized['x-unicorn-nonce'] ?? '';
-        $bodyHash = strtolower($normalized['x-unicorn-body-sha256'] ?? '');
-        $signature = strtolower($normalized['x-unicorn-signature'] ?? '');
+        $bodyHash = $normalized['x-unicorn-body-sha256'] ?? '';
+        $signature = $normalized['x-unicorn-signature'] ?? '';
         $version = $normalized['x-unicorn-signature-version'] ?? '';
 
         if ($method === '' || $timestamp === '' || $nonce === '' || $bodyHash === '' || $signature === '') {
@@ -34,7 +34,7 @@ final class ApiWebSecurity
             return false;
         }
 
-        $expectedBodyHash = hash('sha256', $body);
+        $expectedBodyHash = self::sha256Base64($body);
         if (!hash_equals($expectedBodyHash, $bodyHash)) {
             $error = 'ApiWeb body hash mismatch. The request body changed after signing.';
             return false;
@@ -48,7 +48,7 @@ final class ApiWebSecurity
             return false;
         }
 
-        $expected = self::signature($config, $method, $timestamp, $nonce, $bodyHash);
+        $expected = self::signature($config, $method, 'POST', $timestamp, $nonce, $bodyHash);
         if (!hash_equals($expected, $signature)) {
             $error = 'ApiWeb signature mismatch. Check shared API key and canonical string.';
             return false;
@@ -64,13 +64,12 @@ final class ApiWebSecurity
      * @param string $body Response JSON body.
      * @return void
      */
-    public static function emitResponseHeaders(array $config, string $body): void
+    public static function emitResponseHeaders(array $config, string $body, string $method): void
     {
-        $method = 'response';
         $timestamp = (string)time();
         $nonce = bin2hex(random_bytes(12));
-        $bodyHash = hash('sha256', $body);
-        $signature = self::signature($config, $method, $timestamp, $nonce, $bodyHash);
+        $bodyHash = self::sha256Base64($body);
+        $signature = self::signature($config, $method, 'RESPONSE', $timestamp, $nonce, $bodyHash);
 
         header('X-Unicorn-Signature-Version: ' . ($config['apiweb']['signature_version'] ?? '2026-06-13.hmac-sha256'));
         header('X-Unicorn-Api-Method: ' . $method);
@@ -85,29 +84,67 @@ final class ApiWebSecurity
      *
      * @param array<string,mixed> $config Connector configuration.
      * @param string $method ApiWeb method name.
+     * @param string $transportMethod HTTP transport method or RESPONSE marker.
      * @param string $timestamp Unix timestamp as string.
      * @param string $nonce Request nonce.
-     * @param string $bodyHash SHA256 hash of the body.
-     * @return string Lowercase hexadecimal HMAC.
+     * @param string $bodyHash Base64 encoded SHA-256 hash of the body.
+     * @return string Base64 encoded HMAC-SHA256.
      */
-    public static function signature(array $config, string $method, string $timestamp, string $nonce, string $bodyHash): string
+    public static function signature(
+        array $config,
+        string $method,
+        string $transportMethod,
+        string $timestamp,
+        string $nonce,
+        string $bodyHash
+    ): string
     {
         $secret = (string)($config['apiweb']['secret'] ?? '');
-        return hash_hmac('sha256', self::canonicalString($method, $timestamp, $nonce, $bodyHash), $secret);
+        return base64_encode(hash_hmac(
+            'sha256',
+            self::canonicalString($method, $transportMethod, $timestamp, $nonce, $bodyHash),
+            $secret,
+            true
+        ));
     }
 
     /**
      * Builds the canonical string used by ApiWeb signatures.
      *
      * @param string $method ApiWeb method name.
+     * @param string $transportMethod HTTP transport method or RESPONSE marker.
      * @param string $timestamp Unix timestamp as string.
      * @param string $nonce Request nonce.
-     * @param string $bodyHash SHA256 hash of the body.
+     * @param string $bodyHash Base64 encoded SHA-256 hash of the body.
      * @return string Canonical string with newline separators.
      */
-    public static function canonicalString(string $method, string $timestamp, string $nonce, string $bodyHash): string
+    public static function canonicalString(
+        string $method,
+        string $transportMethod,
+        string $timestamp,
+        string $nonce,
+        string $bodyHash
+    ): string
     {
-        return $method . "\n" . $timestamp . "\n" . $nonce . "\n" . strtolower($bodyHash);
+        return implode("\n", [
+            '2026-06-13.hmac-sha256',
+            $timestamp,
+            $nonce,
+            $method,
+            strtoupper($transportMethod),
+            $bodyHash,
+        ]);
+    }
+
+    /**
+     * Computes the Base64 encoded SHA-256 hash used by ApiWeb headers.
+     *
+     * @param string $value Raw request or response body.
+     * @return string Base64 encoded SHA-256 hash.
+     */
+    public static function sha256Base64(string $value): string
+    {
+        return base64_encode(hash('sha256', $value, true));
     }
 
     /**
@@ -133,4 +170,3 @@ final class ApiWebSecurity
         return $normalized;
     }
 }
-

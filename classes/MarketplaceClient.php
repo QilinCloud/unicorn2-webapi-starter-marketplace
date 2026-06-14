@@ -120,7 +120,7 @@ final class MarketplaceClient
      */
     public function setOrderSend(array $object): array
     {
-        return $this->processObjectUpdate('setOrderSend', $object, 'ShopId', 'shipment confirmation');
+        return $this->processObjectUpdate('setOrderSend', $object, 'shipment confirmation');
     }
 
     /**
@@ -131,7 +131,7 @@ final class MarketplaceClient
      */
     public function setStock(array $object): array
     {
-        return $this->processObjectUpdate('setStock', $object, 'ShopId', 'stock update');
+        return $this->processObjectUpdate('setStock', $object, 'stock update');
     }
 
     /**
@@ -142,7 +142,7 @@ final class MarketplaceClient
      */
     public function setPrice(array $object): array
     {
-        return $this->processObjectUpdate('setPrice', $object, 'ShopId', 'price update');
+        return $this->processObjectUpdate('setPrice', $object, 'price update');
     }
 
     /**
@@ -153,7 +153,7 @@ final class MarketplaceClient
      */
     public function setProcessingTime(array $object): array
     {
-        return $this->processObjectUpdate('setProcessingTime', $object, 'ShopId', 'processing-time update');
+        return $this->processObjectUpdate('setProcessingTime', $object, 'processing-time update');
     }
 
     /**
@@ -161,14 +161,17 @@ final class MarketplaceClient
      *
      * @param string $method ApiWeb method name.
      * @param array<string,mixed> $object Object from Unicorn.
-     * @param string $idField Required marketplace identifier field.
      * @param string $label Human-readable operation label.
      * @return array<string,mixed> Result item or errors.
      */
-    private function processObjectUpdate(string $method, array $object, string $idField, string $label): array
+    private function processObjectUpdate(string $method, array $object, string $label): array
     {
-        if (empty($object[$idField])) {
-            return ['errors' => [ApiWebResponse::error(422, 'Cannot perform ' . $label . ': required field ' . $idField . ' is missing.')]];
+        $marketplaceIdentifier = $this->resolveMarketplaceIdentifier($object);
+        if ($marketplaceIdentifier === '') {
+            return ['errors' => [ApiWebResponse::error(
+                422,
+                'Cannot perform ' . $label . ': no stable marketplace identifier found. Provide ShopId/MarketplaceId if the item was listed before, or provide SKU/ArtikelNummer/EAN so the adapter can resolve the marketplace offer id.'
+            )]];
         }
 
         $failure = $this->failureMode();
@@ -183,7 +186,7 @@ final class MarketplaceClient
             return [
                 'item' => [
                     'Success' => true,
-                    'ShopId' => (string)$object[$idField],
+                    'ShopId' => $marketplaceIdentifier,
                     'Message' => 'Demo ' . $label . ' accepted.',
                 ],
             ];
@@ -202,10 +205,33 @@ final class MarketplaceClient
         return [
             'item' => [
                 'Success' => true,
-                'ShopId' => (string)$object[$idField],
+                'ShopId' => $marketplaceIdentifier,
                 'Message' => 'Marketplace accepted ' . $label . '.',
             ],
         ];
+    }
+
+    /**
+     * Resolves the best stable identifier for marketplace object updates.
+     *
+     * The preferred value is a marketplace-side id already stored in ShopId or
+     * MarketplaceId. When a marketplace has a separate internal offer/unit id,
+     * resolve it from SKU or EAN inside the real adapter before sending the
+     * marketplace request.
+     *
+     * @param array<string,mixed> $object ApiWeb object from Unicorn.
+     * @return string Stable identifier or an empty string when none is present.
+     */
+    private function resolveMarketplaceIdentifier(array $object): string
+    {
+        foreach (['MarketplaceId', 'MarketplaceOfferId', 'UnitId', 'ShopId', 'ArtikelNummer', 'Sku', 'SKU', 'SellerSku', 'SellerSKU', 'Ean', 'EAN', 'Gtin', 'GTIN'] as $field) {
+            $value = trim((string)($object[$field] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return '';
     }
 
     /**

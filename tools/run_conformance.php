@@ -192,7 +192,7 @@ final class ApiWebConformanceRunner
         $this->assertObjectErrorCode('getOrders unknown', $unknown, 999);
 
         $missingId = $this->request('setStock', null, [[]]);
-        $this->assertObjectErrorCode('setStock missing ShopId', $missingId, 422);
+        $this->assertObjectErrorCode('setStock missing identifier', $missingId, 422);
 
         $badSignature = $this->request('getCapabilities', null, null, 'wrong-secret');
         $error = $badSignature['Error'] ?? null;
@@ -236,14 +236,14 @@ final class ApiWebConformanceRunner
 
         $timestamp = (string)time();
         $nonce = bin2hex(random_bytes(12));
-        $bodyHash = hash('sha256', $body);
+        $bodyHash = ApiWebSecurity::sha256Base64($body);
 
         $config = $this->config;
         if ($secretOverride !== null) {
             $config['apiweb']['secret'] = $secretOverride;
         }
 
-        $signature = ApiWebSecurity::signature($config, $method, $timestamp, $nonce, $bodyHash);
+        $signature = ApiWebSecurity::signature($config, $method, 'POST', $timestamp, $nonce, $bodyHash);
         $headers = [
             'Content-Type: application/json',
             'X-Unicorn-Signature-Version: ' . ($this->config['apiweb']['signature_version'] ?? '2026-06-13.hmac-sha256'),
@@ -270,6 +270,8 @@ final class ApiWebConformanceRunner
             return [];
         }
 
+        $this->assertSignedResponse($method, $raw, $http_response_header ?? []);
+
         $decoded = json_decode($raw, true);
         if (!is_array($decoded)) {
             $this->fail($method . ': response is not JSON: ' . substr($raw, 0, 300));
@@ -277,6 +279,85 @@ final class ApiWebConformanceRunner
         }
 
         return $decoded;
+    }
+
+    /**
+     * Validates ApiWeb response signature headers.
+     *
+     * @param string $method ApiWeb method that was called.
+     * @param string $rawBody Raw response body.
+     * @param array<int,string> $rawHeaders Response headers from PHP stream wrapper.
+     * @return void
+     */
+    private function assertSignedResponse(string $method, string $rawBody, array $rawHeaders): void
+    {
+        $headers = $this->parseHeaders($rawHeaders);
+        $required = [
+            'x-unicorn-signature-version',
+            'x-unicorn-api-method',
+            'x-unicorn-timestamp',
+            'x-unicorn-nonce',
+            'x-unicorn-body-sha256',
+            'x-unicorn-signature',
+        ];
+
+        foreach ($required as $header) {
+            if (($headers[$header] ?? '') === '') {
+                $this->fail($method . ' response is missing header ' . $header . '.');
+                return;
+            }
+        }
+
+        if (($headers['x-unicorn-signature-version'] ?? '') !== ($this->config['apiweb']['signature_version'] ?? '2026-06-13.hmac-sha256')) {
+            $this->fail($method . ' response signature version is invalid.');
+            return;
+        }
+
+        if (($headers['x-unicorn-api-method'] ?? '') !== $method) {
+            $this->fail($method . ' response X-Unicorn-Api-Method must be the original request method.');
+            return;
+        }
+
+        $expectedBodyHash = ApiWebSecurity::sha256Base64($rawBody);
+        if (!hash_equals($expectedBodyHash, $headers['x-unicorn-body-sha256'])) {
+            $this->fail($method . ' response body hash is invalid. Sign the exact raw response body sent to Unicorn.');
+            return;
+        }
+
+        $expectedSignature = ApiWebSecurity::signature(
+            $this->config,
+            $method,
+            'RESPONSE',
+            $headers['x-unicorn-timestamp'],
+            $headers['x-unicorn-nonce'],
+            $headers['x-unicorn-body-sha256']
+        );
+
+        if (!hash_equals($expectedSignature, $headers['x-unicorn-signature'])) {
+            $this->fail($method . ' response signature is invalid.');
+        }
+    }
+
+    /**
+     * Parses response header lines into lowercase header names.
+     *
+     * @param array<int,string> $rawHeaders Response headers from PHP stream wrapper.
+     * @return array<string,string>
+     */
+    private function parseHeaders(array $rawHeaders): array
+    {
+        $headers = [];
+        foreach ($rawHeaders as $line) {
+            $position = strpos($line, ':');
+            if ($position === false) {
+                continue;
+            }
+
+            $name = strtolower(trim(substr($line, 0, $position)));
+            $headers[$name] = trim(substr($line, $position + 1));
+        }
+
+        return $headers;
     }
 
     /**

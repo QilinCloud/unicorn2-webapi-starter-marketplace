@@ -30,8 +30,8 @@ if ($body === false) {
 
 $timestamp = (string)time();
 $nonce = bin2hex(random_bytes(12));
-$bodyHash = hash('sha256', $body);
-$signature = ApiWebSecurity::signature($config, $method, $timestamp, $nonce, $bodyHash);
+$bodyHash = ApiWebSecurity::sha256Base64($body);
+$signature = ApiWebSecurity::signature($config, $method, 'POST', $timestamp, $nonce, $bodyHash);
 $headers = [
     'Content-Type: application/json',
     'X-Unicorn-Signature-Version: ' . ($config['apiweb']['signature_version'] ?? '2026-06-13.hmac-sha256'),
